@@ -182,7 +182,7 @@ def run_batch(net, data):
     results = []
     for batch in data:
         outputs = net(batch)
-        for output in outputs.asnumpy(): results.append(output)
+        results.extend([o for o in outputs.asnumpy()])
     return np.array(results)
 ```
 
