@@ -38,14 +38,18 @@ These are images and a vizualisation script
 ```python
 image_folder = "images"
 utils_file = "utils.py" # contain utils function to plot nice visualization
+image_net_labels_file = "image_net_labels.json"
 images = ['apron', 'hammerheadshark', 'dog', 'wrench', 'dolphin', 'lotus']
-base_url = "https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/{}?raw=true"
+base_url = "https://raw.githubusercontent.com/ThomasDelteil/web-data/tutorial_onnx/mxnet/doc/tutorials/onnx/{}?raw=true"
 
 if not os.path.isdir(image_folder):
     os.makedirs(image_folder)
-    for image in images: wget.download(base_url.format("{}/{}.jpg".format(image_folder, image)), image_folder)
+    for image in images:
+        wget.download(base_url.format("{}/{}.jpg".format(image_folder, image)), image_folder)
 if not os.path.isfile(utils_file):
-    wget.download(base_url.format(utils_file))                               
+    wget.download(base_url.format(utils_file))       
+if not os.path.isfile(image_net_labels_file):
+    wget.download(base_url.format(image_net_labels_file))  
 ```
 
 
@@ -53,9 +57,9 @@ if not os.path.isfile(utils_file):
 from utils import *
 ```
 
-## Downloading a model from the [ONNX model zoo](https://github.com/onnx/models)
+## Downloading a model from the ONNX model zoo
 
-We download a pre-trained model, in our case the [vgg16](https://arxiv.org/abs/1409.1556) model, trained on [ImageNet](www.image-net.org/). The model comes packaged in an archive `tar.gz` file containing an `model.onnx` model file and some sample input/output data.
+We download a pre-trained model, in our case the [vgg16](https://arxiv.org/abs/1409.1556) model, trained on [ImageNet](http://www.image-net.org/) from the [ONNX model zoo](https://github.com/onnx/models). The model comes packaged in an archive `tar.gz` file containing an `model.onnx` model file and some sample input/output data.
 
 
 ```python
@@ -90,7 +94,7 @@ The models have been pre-trained on ImageNet, let's load the label mapping of th
 
 
 ```python
-categories = json.load(open('ImageNet_labels.json', 'r'))
+categories = json.load(open(image_net_labels_file, 'r'))
 ```
 
 ## Loading the model into MXNet Gluon
@@ -114,7 +118,7 @@ We pick a context, CPU or GPU
 ctx = mx.cpu()
 ```
 
-And load them into a MXNet Gluon symbol block
+And load them into a MXNet Gluon symbol block. For ONNX models the default input name is `input_0`.
 
 
 ```python
@@ -125,7 +129,7 @@ for param in params:
         net_params[param]._load_init(params[param], ctx=ctx)
 ```
 
-This [hybridizes](https://mxnet.incubator.apache.org/tutorials/gluon/hybrid.html) the network the computational graph gets cached and we get performance gains
+We can now cache the computational graph through [hybridization](https://mxnet.incubator.apache.org/tutorials/gluon/hybrid.html) to gain some performance
 
 
 
@@ -147,9 +151,13 @@ outputs = sample['outputs']
 
 ```python
 print("Input format: {}".format(inputs[0].shape))
+print("Output format: {}".format(outputs[0].shape))
 ```
 
-    Input format: (1, 3, 224, 224) <!--no-notebook-->
+Input format: (1, 3, 224, 224) <!--no-notebook-->
+
+Output format: (1, 1000) <!--no-notebook-->
+    
 
 
 We can visualize the network (requires graphviz installed)
@@ -166,7 +174,7 @@ mx.visualization.plot_network(sym, shape={"input_0":inputs[0].shape}, node_attrs
 
 
 
-This is a helper function to run a batch of data through the net and collate the outputs
+This is a helper function to run M batches of data of batch-size N through the net and collate the outputs into an array of shape (K, 1000) where K=MxN is the total number of examples (mumber of batches x batch-size) run through the network.
 
 
 ```python
@@ -197,15 +205,16 @@ Good the sample output and our prediction match, now we can run against real dat
 
 
 ```python
-TOP_N = 3 # How many top guesses we show in the visualization
+TOP_P = 3 # How many top guesses we show in the visualization
 ```
 
 
-Transform function to set the data into the format the network requires (N, 3, 224, 224)
+Transform function to set the data into the format the network expects, (N, 3, 224, 224) where N is the batch size.
 
 
 ```python
-transform = lambda img: np.expand_dims(np.transpose(img, (2,0,1)),axis=0).astype(np.float32)
+def transform(img):
+    return np.expand_dims(np.transpose(img, (2,0,1)),axis=0).astype(np.float32)
 ```
 
 
@@ -227,7 +236,7 @@ result = run_batch(net, [batch])
 
 
 ```python
-plot_predictions(image_net_images, result[:3], categories, TOP_N)
+plot_predictions(image_net_images, result[:3], categories, TOP_P)
 ```
 
 
@@ -240,16 +249,16 @@ Let's now see the results on the 3 other images
 
 
 ```python
-plot_predictions(caltech101_images, result[3:7], categories, TOP_N)
+plot_predictions(caltech101_images, result[3:7], categories, TOP_P)
 ```
 
 
 ![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/caltech101.png?raw=true)<!--no-notebook-->
 
 
-**Hmm, not so good...** We see where the network is coming from but effectively `wrench`, `dolphin` and `lotus` categories are not in the ImageNet classes...
+**Hmm, not so good...**  Even though predictions are close, they are not accurate, which is due to the fact that the ImageNet dataset does not contain `wrench`, `dolphin`, or `lotus` categories and our network has been trained on ImageNet.
 
-Lucky for us, the [Caltech101 dataset](http://www.vision.caltech.edu/Image_Datasets/Caltech101/) has them, let's see if we can fine-tune our network to classify those correctly.
+Lucky for us, the [Caltech101 dataset](http://www.vision.caltech.edu/Image_Datasets/Caltech101/) has them, let's see how we can fine-tune our network to classify these categories correctly.
 
 We show that in our next tutorials:
 
