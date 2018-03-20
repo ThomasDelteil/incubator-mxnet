@@ -5,9 +5,9 @@
 
 In this tutorial we will:
     
-    - learn how to load a pre-trained .onnx model file into MXNet/Gluon
-    - learn how to test this model using the sample input/output
-    - learn how to test the model on custom images
+- learn how to load a pre-trained .onnx model file into MXNet/Gluon
+- learn how to test this model using the sample input/output
+- learn how to test the model on custom images
 
 ## Pre-requisite
 
