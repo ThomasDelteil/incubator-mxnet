@@ -125,7 +125,7 @@ for param in params:
         net_params[param]._load_init(params[param], ctx=ctx)
 ```
 
-This [hybridize](https://mxnet.incubator.apache.org/tutorials/gluon/hybrid.html) the network the computational graph gets cached and we get performance gains
+This [hybridizes](https://mxnet.incubator.apache.org/tutorials/gluon/hybrid.html) the network the computational graph gets cached and we get performance gains
 
 
 
