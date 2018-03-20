@@ -1,5 +1,5 @@
 
-# Running inference on MXNet from an ONNX model
+# Running inference on MXNet/Gluon from an ONNX model
 
 [Open Neural Network Exchange (ONNX)](https://github.com/onnx/onnx) provides an open source format for AI models. It defines an extensible computation graph model, as well as definitions of built-in operators and standard data types.
 
@@ -55,7 +55,7 @@ from utils import *
 
 ## Downloading a model from the [ONNX model zoo](https://github.com/onnx/models)
 
-We download a pre-trained model, in our case the [vgg16](https://arxiv.org/abs/1409.1556) model, trained on ImageNet. The model comes packaged in a archive `tar.gz` file containing an `model.onnx` model file and some sample input/output data.
+We download a pre-trained model, in our case the [vgg16](https://arxiv.org/abs/1409.1556) model, trained on [ImageNet](www.image-net.org/). The model comes packaged in an archive `tar.gz` file containing an `model.onnx` model file and some sample input/output data.
 
 
 ```python
@@ -86,7 +86,7 @@ if not os.path.isdir(os.path.join(model_folder, current_model)):
     tar.close()
 ```
 
-The models have been pre-trained on ImageNet, let's load the label mapping
+The models have been pre-trained on ImageNet, let's load the label mapping of the 1000 classes.
 
 
 ```python
@@ -125,14 +125,16 @@ for param in params:
         net_params[param]._load_init(params[param], ctx=ctx)
 ```
 
+This [hybridize](https://mxnet.incubator.apache.org/tutorials/gluon/hybrid.html) the network the computational graph gets cached and we get performance gains
+
+
 
 ```python
-# This hybridize the network so we get performance gains
 net.hybridize()
 ```
 
 ## Test using sample inputs and outputs
-The model comes with sample input/output we can use to test that the model is correctly loaded
+The model comes with sample input/output we can use to test that whether model is correctly loaded
 
 
 ```python
@@ -164,7 +166,7 @@ mx.visualization.plot_network(sym, shape={"input_0":inputs[0].shape}, node_attrs
 
 
 
-Helper function to run a batch of data through the net and collate the outputs
+This is a helper function to run a batch of data through the net and collate the outputs
 
 
 ```python
@@ -189,35 +191,34 @@ print("Loaded model and sample output predict the same class: {}".format(np.argm
     Loaded model and sample output predict the same class: True <!--no-notebook-->
 
 
-Good, now we can run against real data
+Good the sample output and our prediction match, now we can run against real data
 
 ## Test using real images
 
 
 ```python
-TOP_N = 3 # How many top guesses we show
+TOP_N = 3 # How many top guesses we show in the visualization
 ```
 
 
+Transform function to set the data into the format the network requires (N, 3, 224, 224)
+
+
 ```python
-# Transform to put the data into a network acceptable format
 transform = lambda img: np.expand_dims(np.transpose(img, (2,0,1)),axis=0).astype(np.float32)
 ```
 
 
-```python
-img0 = plt.imread('images/apron.jpg')
-img1 = plt.imread('images/hammerheadshark.jpg')
-img2 = plt.imread('images/dog.jpg')
-img3 = plt.imread('images/wrench.jpg')
-img4 = plt.imread('images/dolphin.jpg')
-img5 = plt.imread('images/lotus.jpg')
+We load two sets of images in memory
 
-image_net_images = [img0, img1, img2]
-caltech101_images = [img3, img4, img5]
+
+```python
+image_net_images = [plt.imread('images/{}.jpg'.format(path)) for path in ['apron', 'hammerheadshark','dog']]
+caltech101_images = [plt.imread('images/{}.jpg'.format(path)) for path in ['wrench', 'dolphin','lotus']]
 images = image_net_images + caltech101_images
 ```
 
+And run them as a batch through the network to get the predictions
 
 ```python
 batch = nd.array(np.concatenate([transform(img) for img in images], axis=0), ctx=ctx)
@@ -233,9 +234,9 @@ plot_predictions(image_net_images, result[:3], categories, TOP_N)
 ![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/imagenet.png?raw=true)<!--no-notebook-->
 
 
-**Well done!** Looks like it is doing a pretty good job at classifying pictures when the category is in the ImageNet list
+**Well done!** Looks like it is doing a pretty good job at classifying pictures when the category is a ImageNet label
 
-Let's now see the results on the other images
+Let's now see the results on the 3 other images
 
 
 ```python
@@ -248,10 +249,10 @@ plot_predictions(caltech101_images, result[3:7], categories, TOP_N)
 
 **Hmm, not so good...** We see where the network is coming from but effectively `wrench`, `dolphin` and `lotus` categories are not in the ImageNet classes...
 
-Lucky for us, the [Caltech101 dataset](http://www.vision.caltech.edu/Image_Datasets/Caltech101/) has them, let's see if we can fine-tune our network to classify those
+Lucky for us, the [Caltech101 dataset](http://www.vision.caltech.edu/Image_Datasets/Caltech101/) has them, let's see if we can fine-tune our network to classify those correctly.
 
 We show that in our next tutorials:
     - [Fine-tuning a ONNX Model using the modern MXNet/Gluon API](addlink)
     - [Fine-tuning a ONNX Model using the old MXNet/Module API](addlink)
     
-    <!-- INSERT SOURCE DOWNLOAD BUTTONS -->
+<!-- INSERT SOURCE DOWNLOAD BUTTONS -->
