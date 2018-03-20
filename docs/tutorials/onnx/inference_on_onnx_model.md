@@ -252,7 +252,8 @@ plot_predictions(caltech101_images, result[3:7], categories, TOP_N)
 Lucky for us, the [Caltech101 dataset](http://www.vision.caltech.edu/Image_Datasets/Caltech101/) has them, let's see if we can fine-tune our network to classify those correctly.
 
 We show that in our next tutorials:
-    - [Fine-tuning a ONNX Model using the modern MXNet/Gluon API](addlink)
-    - [Fine-tuning a ONNX Model using the old MXNet/Module API](addlink)
+
+- [Fine-tuning a ONNX Model using the modern imperative MXNet/Gluon API](addlink)
+- [Fine-tuning a ONNX Model using the symbolic MXNet/Module API](addlink)
     
 <!-- INSERT SOURCE DOWNLOAD BUTTONS -->
