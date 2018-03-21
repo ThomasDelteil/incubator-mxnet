@@ -196,7 +196,7 @@ result = run_batch(net, nd.array(inputs, ctx))
 print("Loaded model and sample output predict the same class: {}".format(np.argmax(result) == np.argmax(outputs[0])))
 ```
 
-    Loaded model and sample output predict the same class: True <!--no-notebook-->
+Loaded model and sample output predict the same class: True <!--no-notebook-->
 
 
 Good the sample output and our prediction match, now we can run against real data
