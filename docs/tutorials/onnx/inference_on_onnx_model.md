@@ -154,9 +154,9 @@ print("Input format: {}".format(inputs[0].shape))
 print("Output format: {}".format(outputs[0].shape))
 ```
 
-Input format: (1, 3, 224, 224) <!--no-notebook-->
+Input format: (1, 3, 224, 224) <!--notebook-skip-line-->
 
-Output format: (1, 1000) <!--no-notebook-->
+Output format: (1, 1000) <!--notebook-skip-line-->
     
 
 
@@ -170,7 +170,7 @@ mx.visualization.plot_network(sym, shape={"input_0":inputs[0].shape}, node_attrs
 
 
 
-![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/network.png?raw=true)<!--no-notebook-->
+![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/network.png?raw=true)<!--notebook-skip-line-->
 
 
 
@@ -188,7 +188,7 @@ def run_batch(net, data):
 
 
 ```python
-result = run_batch(net, nd.array(inputs, ctx))
+result = run_batch(net, nd.array([inputs[0]], ctx))
 ```
 
 
@@ -196,7 +196,7 @@ result = run_batch(net, nd.array(inputs, ctx))
 print("Loaded model and sample output predict the same class: {}".format(np.argmax(result) == np.argmax(outputs[0])))
 ```
 
-Loaded model and sample output predict the same class: True <!--no-notebook-->
+Loaded model and sample output predict the same class: True <!--notebook-skip-line-->
 
 
 Good the sample output and our prediction match, now we can run against real data
@@ -240,7 +240,7 @@ plot_predictions(image_net_images, result[:3], categories, TOP_P)
 ```
 
 
-![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/imagenet.png?raw=true)<!--no-notebook-->
+![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/imagenet.png?raw=true)<!--notebook-skip-line-->
 
 
 **Well done!** Looks like it is doing a pretty good job at classifying pictures when the category is a ImageNet label
@@ -253,7 +253,7 @@ plot_predictions(caltech101_images, result[3:7], categories, TOP_P)
 ```
 
 
-![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/caltech101.png?raw=true)<!--no-notebook-->
+![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/caltech101.png?raw=true)<!--notebook-skip-line-->
 
 
 **Hmm, not so good...**  Even though predictions are close, they are not accurate, which is due to the fact that the ImageNet dataset does not contain `wrench`, `dolphin`, or `lotus` categories and our network has been trained on ImageNet.
