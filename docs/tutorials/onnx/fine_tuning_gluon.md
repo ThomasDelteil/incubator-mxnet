@@ -45,7 +45,7 @@ These are images and a vizualisation script
 image_folder = "images"
 utils_file = "utils.py" # contain utils function to plot nice visualization
 images = ['wrench', 'dolphin', 'lotus']
-base_url = "https://github.com/dmlc/web-data/tree/master/mxnet/doc/tutorials/onnx{}?raw=true"
+base_url = "https://github.com/dmlc/web-data/tree/master/mxnet/doc/tutorials/onnx/{}?raw=true"
 
 if not os.path.isdir(image_folder):
     os.makedirs(image_folder)
