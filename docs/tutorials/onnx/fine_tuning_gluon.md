@@ -416,3 +416,5 @@ plot_predictions(caltech101_images_test, result, categories, TOP_P)
 
 
 **Great!** The network classified these images correctly after being fine-tuned on a dataset that contains images of `wrench`, `dolphin` and `lotus`
+
+<!-- INSERT SOURCE DOWNLOAD BUTTONS -->
