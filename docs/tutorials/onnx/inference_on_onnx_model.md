@@ -40,7 +40,7 @@ image_folder = "images"
 utils_file = "utils.py" # contain utils function to plot nice visualization
 image_net_labels_file = "image_net_labels.json"
 images = ['apron', 'hammerheadshark', 'dog', 'wrench', 'dolphin', 'lotus']
-base_url = "https://raw.githubusercontent.com/ThomasDelteil/web-data/tutorial_onnx/mxnet/doc/tutorials/onnx/{}?raw=true"
+base_url = "https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/doc/tutorials/onnx/{}?raw=true"
 
 if not os.path.isdir(image_folder):
     os.makedirs(image_folder)
@@ -170,7 +170,7 @@ mx.visualization.plot_network(sym, shape={"input_0":inputs[0].shape}, node_attrs
 
 
 
-![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/network.png?raw=true)<!--notebook-skip-line-->
+![png](https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/doc/tutorials/onnx/network.png?raw=true)<!--notebook-skip-line-->
 
 
 
@@ -240,7 +240,7 @@ plot_predictions(image_net_images, result[:3], categories, TOP_P)
 ```
 
 
-![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/imagenet.png?raw=true)<!--notebook-skip-line-->
+![png](https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/doc/tutorials/onnx/imagenet.png?raw=true)<!--notebook-skip-line-->
 
 
 **Well done!** Looks like it is doing a pretty good job at classifying pictures when the category is a ImageNet label
@@ -253,7 +253,7 @@ plot_predictions(caltech101_images, result[3:7], categories, TOP_P)
 ```
 
 
-![png](https://github.com/ThomasDelteil/web-data/blob/c77c2e93ba142f45682ed63c191d2568b20aff25/mxnet/doc/tutorials/onnx/caltech101.png?raw=true)<!--notebook-skip-line-->
+![png](https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/doc/tutorials/onnx/caltech101.png?raw=true)<!--notebook-skip-line-->
 
 
 **Hmm, not so good...**  Even though predictions are close, they are not accurate, which is due to the fact that the ImageNet dataset does not contain `wrench`, `dolphin`, or `lotus` categories and our network has been trained on ImageNet.
@@ -262,7 +262,7 @@ Lucky for us, the [Caltech101 dataset](http://www.vision.caltech.edu/Image_Datas
 
 We show that in our next tutorials:
 
-- [Fine-tuning a ONNX Model using the modern imperative MXNet/Gluon API](addlink)
-- [Fine-tuning a ONNX Model using the symbolic MXNet/Module API](addlink)
+- Fine-tuning a ONNX Model using the modern imperative MXNet/Gluon API(Coming soon)
+- Fine-tuning a ONNX Model using the symbolic MXNet/Module API(Coming soon)
     
 <!-- INSERT SOURCE DOWNLOAD BUTTONS -->
