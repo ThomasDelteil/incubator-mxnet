@@ -78,8 +78,9 @@ def run_metric(name, data_gen_cls, i, n, c, pred_ctx, label_ctx, **kwargs):
         elapsed_str = "{:<.5}".format(elapsed)
     except mx.MXNetError:
         elapsed_str = "FAILED"
-    print("{metric:<15}{pctx:<10}{lctx:<12}{niter:<12}{bs:<15}{out_dim:<15}{elapsed:<}".format(
-        metric=name, pctx=str(pred_ctx), lctx=str(label_ctx), niter=i * n, bs=data_gen.batch_size,
+    print("{metric:<15}{mctx:<10}{pctx:<10}{lctx:<12}{niter:<12}{bs:<15}{out_dim:<15}{elapsed:<}".format(
+        metric=name, mctx=str(kwargs['ctx']),
+        pctx=str(pred_ctx), lctx=str(label_ctx), niter=i * n, bs=data_gen.batch_size,
         out_dim=data_gen.output_dim, elapsed=elapsed_str), file=sys.stderr)
 
 
@@ -108,13 +109,14 @@ def test_metric_performance():
     print("\nmx.metric benchmarks", file=sys.stderr)
     print(
         "{:15}{:10}{:12}{:12}{:15}{:15}{}".format(
-            'Metric', 'Data-Ctx', 'Label-Ctx', 'Data Size', 'Batch Size', 'Output Dim', 'Elapsed Time'),
+            'Metric', 'Metric-Ctx', 'Data-Ctx', 'Label-Ctx', 'Data Size', 'Batch Size', 'Output Dim', 'Elapsed Time'),
         file=sys.stderr)
     print("{:-^90}".format(''), file=sys.stderr)
     for k, v in metrics:
         for c in output_dims:
             for n in batch_sizes:
-                for pred_ctx, label_ctx in itertools.product(ctxs, ctxs):
+                for pred_ctx, label_ctx, metric_ctx in itertools.product([mx.gpu()], ctxs, ctxs):
+                    v[0]['ctx'] = metric_ctx
                     run_metric(k, v[1], (data_size * 128)//(n * c), n, c, pred_ctx, label_ctx, **v[0])
                 print("{:-^90}".format(''), file=sys.stderr)
 

@@ -1863,6 +1863,8 @@ fixed-size items.
         >>> y.dtype
         <type 'numpy.int32'>
         """
+        if np.dtype(dtype) == self.dtype:
+            return self
         res = empty(self.shape, ctx=self.context, dtype=dtype)
         self.copyto(res)
         return res

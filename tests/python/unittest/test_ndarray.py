@@ -725,6 +725,30 @@ def test_order():
                  k=dat_size*dat_size*dat_size*dat_size, is_ascend=False)
     assert_almost_equal(nd_ret_sort, gt)
 
+
+@with_seed()
+def test_ndarray_astype():
+    x = mx.nd.zeros((2, 3), dtype='int32')
+    y = x.astype('float32')
+    assert (y.dtype==np.float32)
+    # Test that a new ndarray has been allocated
+    assert (id(x) != id(y))
+
+    # test that it works whether with 'dtype' or
+    # np.dtype
+    x = mx.nd.zeros((2, 3), dtype='int32')
+    y = x.astype(np.float32)
+    assert (y.dtype==np.float32)
+    # Test that a new ndarray has been allocated
+    assert (id(x) != id(y))
+
+
+    x = mx.nd.zeros((2, 3), dtype='int32')
+    y = x.astype('int32')
+    assert (id(x) == id(y))
+
+
+
 @with_seed()
 def test_ndarray_equal():
     x = mx.nd.zeros((2, 3))

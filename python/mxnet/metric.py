@@ -92,13 +92,15 @@ class EvalMetric(object):
         By default mx.cpu()
     """
     def __init__(self, name, output_names=None,
-                 label_names=None, ctx=ctx.cpu(), **kwargs):
+                 label_names=None, ctx=ctx.cpu(), wait_to_read=True, **kwargs):
         self.name = str(name)
         self.output_names = output_names
         self.label_names = label_names
         self.ctx = ctx
         self._kwargs = kwargs
-        self.reset()
+        self.dtype = numpy.float32
+        self.num_inst = ndarray.zeros(1, ctx=self.ctx, dtype=self.dtype)
+        self.sum_metric = ndarray.zeros(1, ctx=self.ctx, dtype=self.dtype)
 
     def __str__(self):
         return "EvalMetric: {}".format(dict(self.get_name_value()))
@@ -153,8 +155,9 @@ class EvalMetric(object):
 
     def reset(self):
         """Resets the internal evaluation result to initial state."""
-        self.num_inst = ndarray.zeros(1, ctx=self.ctx, dtype=numpy.float32)
-        self.sum_metric = ndarray.zeros(1, ctx=self.ctx, dtype=numpy.float32)
+
+        self.num_inst = ndarray.zeros(1, ctx=self.ctx, dtype=self.dtype)
+        self.sum_metric = ndarray.zeros(1, ctx=self.ctx, dtype=self.dtype)
 
     def get(self):
         """Gets the current evaluation result.
@@ -414,6 +417,8 @@ class Accuracy(EvalMetric):
             output_names=output_names, label_names=label_names, ctx=ctx)
         self.axis = axis
         self.wait_to_read = wait_to_read
+        self.dtype = numpy.int32
+        self.reset()
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -431,7 +436,7 @@ class Accuracy(EvalMetric):
 
 
         for label, pred_label in zip(labels, preds):
-            label = label.as_in_context(pred_label.ctx)
+            label = label.as_in_context(pred_label.context)
             if pred_label.shape != label.shape:
                 pred_label = ndarray.argmax(pred_label, axis=self.axis)
             pred_label = pred_label.astype('int32')
@@ -439,10 +444,10 @@ class Accuracy(EvalMetric):
 
             labels, preds = check_label_shapes(label, pred_label)
 
-            self.sum_metric += (pred_label.flat == label.flat).sum().as_in_context(self.ctx)
-            self.num_inst += len(pred_label.flat)
-            if self.wait_to_read:
-                self.sum_metric.wait_to_read()
+            self.sum_metric += (pred_label == label).sum().as_in_context(self.ctx)
+            self.num_inst += len(pred_label.reshape((-1,)))
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 
 @register
@@ -523,12 +528,12 @@ class TopKAccuracy(EvalMetric):
             num_samples = pred_label.shape[0]
             num_dims = len(pred_label.shape)
             if num_dims == 1:
-                self.sum_metric += (pred_label.flat == label.flat).sum()
+                self.sum_metric += (pred_label == label).sum()
             elif num_dims == 2:
                 num_classes = pred_label.shape[1]
                 top_k = min(num_classes, self.top_k)
                 for j in range(top_k):
-                    self.sum_metric += (pred_label[:, num_classes - 1 - j].flat == label.flat).sum().as_context(self.ctx)
+                    self.sum_metric += (pred_label[:, num_classes - 1 - j] == label).sum().as_context(self.ctx)
             self.num_inst += num_samples
         if self.wait_to_read:
             self.sum_metric.wait_to_read()
@@ -557,12 +562,16 @@ class _BinaryClassificationMetrics(object):
     def __init__(self, ctx=ctx.cpu(), wait_to_read=True):
         self.ctx = ctx
         self.wait_to_read = wait_to_read
+        self.dtype = numpy.float32
         self.reset_stats()
 
     def update_binary_stats(self, label, pred):
         """
         Update various binary classification counts for a single (label, pred)
         pair.
+        For multi-class, it computes the total number of true and false positives
+        across all classes
+
 
         Parameters
         ----------
@@ -573,13 +582,12 @@ class _BinaryClassificationMetrics(object):
             Predicted values.
         """
 
-        label = label.as_in_context(pred.context).astype('int32')
+        label = label.as_in_context(pred.context).astype(self.dtype)
+        pred = pred.astype(self.dtype)
         pred_label = ndarray.argmax(pred, axis=1)
 
         check_label_shapes(label, pred)
-        if len(ndarray.unique(label)) > 2:
-            raise ValueError("%s currently only supports binary classification."
-                             % self.__class__.__name__)
+
         pred_true = (pred_label == 1)
         pred_false = 1 - pred_true
         label_true = (label == 1)
@@ -624,10 +632,10 @@ class _BinaryClassificationMetrics(object):
                self.true_negatives + self.true_positives).asscalar()
 
     def reset_stats(self):
-        self.true_positives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
-        self.false_negatives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
-        self.false_positives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
-        self.true_negatives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
+        self.true_positives = ndarray.zeros(1, self.ctx, dtype=self.dtype)
+        self.false_negatives = ndarray.zeros(1, self.ctx, dtype=self.dtype)
+        self.false_positives = ndarray.zeros(1, self.ctx, dtype=self.dtype)
+        self.true_negatives = ndarray.zeros(1, self.ctx, dtype=self.dtype)
 
 
 @register
@@ -667,10 +675,6 @@ class F1(EvalMetric):
         more efficient to store and compute the metric directly on GPU in a
         single-GPU training scenario.
         By default mx.cpu()
-    wait_to_read: Boolean
-        Whether to block and wait for the value of the accuracy to be computed on
-        every .update() call
-        By default True
 
     Examples
     --------
@@ -684,12 +688,13 @@ class F1(EvalMetric):
 
     def __init__(self, name='f1',
                  output_names=None, label_names=None, average="macro",
-                 ctx=ctx.cpu(), wait_to_read=True):
+                 ctx=ctx.cpu()):
         self.average = average
-        self.metrics = _BinaryClassificationMetrics(ctx=ctx, wait_to_read=wait_to_read)
+        self.metrics = _BinaryClassificationMetrics(ctx=ctx, wait_to_read=False)
         EvalMetric.__init__(self, name=name,
                             output_names=output_names, label_names=label_names, ctx=ctx)
-        self.wait_to_read = wait_to_read
+        self.num_inst = 0.
+        self.sum_metric = 0.
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -714,13 +719,18 @@ class F1(EvalMetric):
         else:
             self.sum_metric = self.metrics.fscore * self.metrics.total_examples
             self.num_inst = self.metrics.total_examples
-        if self.wait_to_read:
-            self.sum_metric.wait_to_read()
 
     def reset(self):
         """Resets the internal evaluation result to initial state."""
-        super(F1, self).reset()
         self.metrics.reset_stats()
+        self.sum_metric = 0.
+        self.num_inst = 0.
+
+    def get(self):
+        if self.num_inst == 0:
+            return self.name, float('nan')
+        else:
+            return self.name, self.sum_metric / self.num_inst
 
 
 @register
@@ -902,9 +912,9 @@ class MAE(EvalMetric):
             label = label.as_in_context(pred.context)
 
             if len(label.shape) == 1:
-                label = label.reshape(label.shape[0], 1)
+                label = label.expand_dims(axis=1)
             if len(pred.shape) == 1:
-                pred = pred.reshape(pred.shape[0], 1)
+                pred = pred.expand_dims(axis=1)
 
             self.sum_metric += (label - pred).abs().mean().as_in_context(self.ctx)
             self.num_inst += 1 # numpy.prod(label.shape)
@@ -974,9 +984,9 @@ class MSE(EvalMetric):
             label = label.as_in_context(pred.context)
 
             if len(label.shape) == 1:
-                label = label.reshape(label.shape[0], 1)
+                label = label.expand_dims(axis=1)
             if len(pred.shape) == 1:
-                pred = pred.reshape(pred.shape[0], 1)
+                pred = pred.expand_dims(axis=1)
 
             self.sum_metric += ((label - pred)**2.0).mean().as_in_context(self.ctx)
             self.num_inst += 1 # numpy.prod(label.shape)
@@ -1047,9 +1057,9 @@ class RMSE(EvalMetric):
             label = label.as_in_context(pred.context)
 
             if len(label.shape) == 1:
-                label = label.reshape(label.shape[0], 1)
+                label = label.expand_dims(axis=1)
             if len(pred.shape) == 1:
-                pred = pred.reshape(pred.shape[0], 1)
+                pred = pred.expand_dims(axis=1)
 
             self.sum_metric += (((label - pred)**2.0).mean()).sqrt().as_in_context(self.ctx)
             self.num_inst += 1
@@ -1129,7 +1139,7 @@ class CrossEntropy(EvalMetric):
         for label, pred in zip(labels, preds):
             label = label.as_in_context(pred.context)
 
-            label = label.ravel()
+            label = label.reshape((-1,))
             assert label.shape[0] == pred.shape[0]
 
             prob = pred[ndarray.arange(label.shape[0]), label.astype('int64')]
@@ -1208,7 +1218,7 @@ class NegativeLogLikelihood(EvalMetric):
         for label, pred in zip(labels, preds):
             label = label.as_in_context(pred.context)
 
-            label = label.ravel()
+            label = label.reshape((-1,))
             num_examples = pred.shape[0]
             assert label.shape[0] == num_examples, (label.shape[0], num_examples)
             prob = pred[ndarray.arange(num_examples, dtype=numpy.int64), label.astype('int64')]

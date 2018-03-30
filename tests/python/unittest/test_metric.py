@@ -109,7 +109,7 @@ def test_perplexity():
     metric = mx.metric.create('perplexity', -1)
     metric.update([label], [pred])
     _, perplexity = metric.get()
-    assert perplexity == perplexity_expected
+    np.testing.assert_almost_equal(perplexity, perplexity_expected)
 
 def test_pearsonr():
     pred = mx.nd.array([[0.7, 0.3], [0.1, 0.9], [1., 0]])
@@ -118,7 +118,7 @@ def test_pearsonr():
     metric = mx.metric.create('pearsonr')
     metric.update([label], [pred])
     _, pearsonr = metric.get()
-    assert pearsonr == pearsonr_expected
+    np.testing.assert_almost_equal(pearsonr, pearsonr_expected)
 
 def test_single_array_input():
     pred = mx.nd.array([[1,2,3,4]])
