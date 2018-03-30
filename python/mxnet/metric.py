@@ -28,6 +28,7 @@ import numpy
 from .base import numeric_types, string_types
 from . import ndarray
 from . import registry
+from . import context as ctx
 
 
 def check_label_shapes(labels, preds, wrap=False, shape=False):
@@ -84,12 +85,18 @@ class EvalMetric(object):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
     """
     def __init__(self, name, output_names=None,
-                 label_names=None, **kwargs):
+                 label_names=None, ctx=ctx.cpu(), **kwargs):
         self.name = str(name)
         self.output_names = output_names
         self.label_names = label_names
+        self.ctx = ctx
         self._kwargs = kwargs
         self.reset()
 
@@ -146,8 +153,8 @@ class EvalMetric(object):
 
     def reset(self):
         """Resets the internal evaluation result to initial state."""
-        self.num_inst = 0
-        self.sum_metric = 0.0
+        self.num_inst = ndarray.zeros(1, ctx=self.ctx, dtype=numpy.float32)
+        self.sum_metric = ndarray.zeros(1, ctx=self.ctx, dtype=numpy.float32)
 
     def get(self):
         """Gets the current evaluation result.
@@ -159,10 +166,10 @@ class EvalMetric(object):
         values : list of float
            Value of the evaluations.
         """
-        if self.num_inst == 0:
+        if self.num_inst.asscalar() == 0:
             return (self.name, float('nan'))
         else:
-            return (self.name, self.sum_metric / self.num_inst)
+            return (self.name, self.sum_metric.asscalar() / self.num_inst.asscalar())
 
     def get_name_value(self):
         """Returns zipped name and value pairs.
@@ -263,7 +270,7 @@ class CompositeEvalMetric(EvalMetric):
     def __init__(self, metrics=None, name='composite',
                  output_names=None, label_names=None):
         super(CompositeEvalMetric, self).__init__(
-            'composite', output_names=output_names, label_names=label_names)
+            name, output_names=output_names, label_names=label_names)
         if metrics is None:
             metrics = []
         self.metrics = [create(i) for i in metrics]
@@ -381,6 +388,15 @@ class Accuracy(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -392,11 +408,12 @@ class Accuracy(EvalMetric):
     ('accuracy', 0.6666666666666666)
     """
     def __init__(self, axis=1, name='accuracy',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(Accuracy, self).__init__(
             name, axis=axis,
-            output_names=output_names, label_names=label_names)
+            output_names=output_names, label_names=label_names, ctx=ctx)
         self.axis = axis
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -412,16 +429,20 @@ class Accuracy(EvalMetric):
         """
         labels, preds = check_label_shapes(labels, preds, True)
 
+
         for label, pred_label in zip(labels, preds):
+            label = label.as_in_context(pred_label.ctx)
             if pred_label.shape != label.shape:
                 pred_label = ndarray.argmax(pred_label, axis=self.axis)
-            pred_label = pred_label.asnumpy().astype('int32')
-            label = label.asnumpy().astype('int32')
+            pred_label = pred_label.astype('int32')
+            label = label.astype('int32')
 
             labels, preds = check_label_shapes(label, pred_label)
 
-            self.sum_metric += (pred_label.flat == label.flat).sum()
+            self.sum_metric += (pred_label.flat == label.flat).sum().as_in_context(self.ctx)
             self.num_inst += len(pred_label.flat)
+            if self.wait_to_read:
+                self.sum_metric.wait_to_read()
 
 
 @register
@@ -447,6 +468,15 @@ class TopKAccuracy(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -461,11 +491,13 @@ class TopKAccuracy(EvalMetric):
     """
 
     def __init__(self, top_k=1, name='top_k_accuracy',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None,
+                 ctx=ctx.cpu(), wait_to_read=True):
         super(TopKAccuracy, self).__init__(
             name, top_k=top_k,
-            output_names=output_names, label_names=label_names)
+            output_names=output_names, label_names=label_names, ctx=ctx)
         self.top_k = top_k
+        self.wait_to_read = wait_to_read
         assert(self.top_k > 1), 'Please use Accuracy if top_k is no more than 1'
         self.name += '_%d' % self.top_k
 
@@ -484,8 +516,9 @@ class TopKAccuracy(EvalMetric):
 
         for label, pred_label in zip(labels, preds):
             assert(len(pred_label.shape) <= 2), 'Predictions should be no more than 2 dims'
-            pred_label = numpy.argsort(pred_label.asnumpy().astype('float32'), axis=1)
-            label = label.asnumpy().astype('int32')
+            label = label.as_in_context(pred_label.context)
+            pred_label = ndarray.argsort(pred_label.astype('float32'), axis=1)
+            label = label.astype('int32')
             check_label_shapes(label, pred_label)
             num_samples = pred_label.shape[0]
             num_dims = len(pred_label.shape)
@@ -495,8 +528,10 @@ class TopKAccuracy(EvalMetric):
                 num_classes = pred_label.shape[1]
                 top_k = min(num_classes, self.top_k)
                 for j in range(top_k):
-                    self.sum_metric += (pred_label[:, num_classes - 1 - j].flat == label.flat).sum()
+                    self.sum_metric += (pred_label[:, num_classes - 1 - j].flat == label.flat).sum().as_context(self.ctx)
             self.num_inst += num_samples
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 
 class _BinaryClassificationMetrics(object):
@@ -505,13 +540,24 @@ class _BinaryClassificationMetrics(object):
      true/false negative counts are sufficient statistics for various classification metrics.
     This class provides the machinery to track those statistics across mini-batches of
     (label, prediction) pairs.
+
+    Parameters
+    ----------
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
     """
 
-    def __init__(self):
-        self.true_positives = 0
-        self.false_negatives = 0
-        self.false_positives = 0
-        self.true_negatives = 0
+    def __init__(self, ctx=ctx.cpu(), wait_to_read=True):
+        self.ctx = ctx
+        self.wait_to_read = wait_to_read
+        self.reset_stats()
 
     def update_binary_stats(self, label, pred):
         """
@@ -526,12 +572,12 @@ class _BinaryClassificationMetrics(object):
         pred : `NDArray`
             Predicted values.
         """
-        pred = pred.asnumpy()
-        label = label.asnumpy().astype('int32')
-        pred_label = numpy.argmax(pred, axis=1)
+
+        label = label.as_in_context(pred.context).astype('int32')
+        pred_label = ndarray.argmax(pred, axis=1)
 
         check_label_shapes(label, pred)
-        if len(numpy.unique(label)) > 2:
+        if len(ndarray.unique(label)) > 2:
             raise ValueError("%s currently only supports binary classification."
                              % self.__class__.__name__)
         pred_true = (pred_label == 1)
@@ -539,22 +585,29 @@ class _BinaryClassificationMetrics(object):
         label_true = (label == 1)
         label_false = 1 - label_true
 
-        self.true_positives += (pred_true * label_true).sum()
-        self.false_positives += (pred_true * label_false).sum()
-        self.false_negatives += (pred_false * label_true).sum()
-        self.true_negatives += (pred_false * label_false).sum()
+        self.true_positives += (pred_true * label_true).sum().as_in_context(self.ctx)
+        self.false_positives += (pred_true * label_false).sum().as_in_context(self.ctx)
+        self.false_negatives += (pred_false * label_true).sum().as_in_context(self.ctx)
+        self.true_negatives += (pred_false * label_false).sum().as_in_context(self.ctx)
+
+        if self.wait_to_read:
+            self.true_positives.wait_to_read()
+            self.false_positives.wait_to_read()
+            self.false_negatives.wait_to_read()
+            self.true_negatives.wait_to_read()
+
 
     @property
     def precision(self):
-        if self.true_positives + self.false_positives > 0:
-            return float(self.true_positives) / (self.true_positives + self.false_positives)
+        if self.true_positives.asscalar() + self.false_positives.asscalar() > 0:
+            return float(self.true_positives.asscalar()) / (self.true_positives.asscalar() + self.false_positives.asscalar())
         else:
             return 0.
 
     @property
     def recall(self):
-        if self.true_positives + self.false_negatives > 0:
-            return float(self.true_positives) / (self.true_positives + self.false_negatives)
+        if self.true_positives.asscalar() + self.false_negatives.asscalar() > 0:
+            return float(self.true_positives.asscalar()) / (self.true_positives.asscalar() + self.false_negatives.asscalar())
         else:
             return 0.
 
@@ -567,14 +620,14 @@ class _BinaryClassificationMetrics(object):
 
     @property
     def total_examples(self):
-        return self.false_negatives + self.false_positives + \
-               self.true_negatives + self.true_positives
+        return (self.false_negatives + self.false_positives + \
+               self.true_negatives + self.true_positives).asscalar()
 
     def reset_stats(self):
-        self.false_positives = 0
-        self.false_negatives = 0
-        self.true_positives = 0
-        self.true_negatives = 0
+        self.true_positives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
+        self.false_negatives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
+        self.false_positives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
+        self.true_negatives = ndarray.zeros(1, self.ctx, dtype=numpy.int32)
 
 
 @register
@@ -609,6 +662,15 @@ class F1(EvalMetric):
         Strategy to be used for aggregating across mini-batches.
             "macro": average the F1 scores for each batch.
             "micro": compute a single F1 score across all batches.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -621,11 +683,13 @@ class F1(EvalMetric):
     """
 
     def __init__(self, name='f1',
-                 output_names=None, label_names=None, average="macro"):
+                 output_names=None, label_names=None, average="macro",
+                 ctx=ctx.cpu(), wait_to_read=True):
         self.average = average
-        self.metrics = _BinaryClassificationMetrics()
+        self.metrics = _BinaryClassificationMetrics(ctx=ctx, wait_to_read=wait_to_read)
         EvalMetric.__init__(self, name=name,
-                            output_names=output_names, label_names=label_names)
+                            output_names=output_names, label_names=label_names, ctx=ctx)
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -650,11 +714,12 @@ class F1(EvalMetric):
         else:
             self.sum_metric = self.metrics.fscore * self.metrics.total_examples
             self.num_inst = self.metrics.total_examples
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
     def reset(self):
         """Resets the internal evaluation result to initial state."""
-        self.sum_metric = 0.
-        self.num_inst = 0.
+        super(F1, self).reset()
         self.metrics.reset_stats()
 
 
@@ -702,6 +767,15 @@ class Perplexity(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -713,12 +787,14 @@ class Perplexity(EvalMetric):
     ('Perplexity', 1.7710976285155853)
     """
     def __init__(self, ignore_label, axis=-1, name='perplexity',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None,
+                 ctx=ctx.cpu(), wait_to_read=True):
         super(Perplexity, self).__init__(
             name, ignore_label=ignore_label,
-            output_names=output_names, label_names=label_names)
+            output_names=output_names, label_names=label_names, ctx=ctx)
         self.ignore_label = ignore_label
         self.axis = axis
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -735,18 +811,19 @@ class Perplexity(EvalMetric):
         loss = 0.
         num = 0
         for label, pred in zip(labels, preds):
+
             assert label.size == pred.size/pred.shape[-1], \
                 "shape mismatch: %s vs. %s"%(label.shape, pred.shape)
             label = label.as_in_context(pred.context).reshape((label.size,))
             pred = ndarray.pick(pred, label.astype(dtype='int32'), axis=self.axis)
             if self.ignore_label is not None:
                 ignore = (label == self.ignore_label).astype(pred.dtype)
-                num -= ndarray.sum(ignore).asscalar()
+                num -= ndarray.sum(ignore)
                 pred = pred*(1-ignore) + ignore
-            loss -= ndarray.sum(ndarray.log(ndarray.maximum(1e-10, pred))).asscalar()
+            loss -= ndarray.sum(ndarray.log(ndarray.maximum(1e-10, pred)))
             num += pred.size
-        self.sum_metric += loss
-        self.num_inst += num
+        self.sum_metric += loss.as_in_context(self.ctx)
+        self.num_inst += num.as_in_context(self.ctx)
 
     def get(self):
         """Returns the current evaluation result.
@@ -756,7 +833,7 @@ class Perplexity(EvalMetric):
         Tuple of (str, float)
             Representing name of the metric and evaluation result.
         """
-        return (self.name, math.exp(self.sum_metric/self.num_inst))
+        return (self.name, math.exp(self.sum_metric.asscalar()/self.num_inst.asscalar()))
 
 ####################
 # REGRESSION METRICS
@@ -782,6 +859,15 @@ class MAE(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -794,9 +880,10 @@ class MAE(EvalMetric):
     """
 
     def __init__(self, name='mae',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(MAE, self).__init__(
-            name, output_names=output_names, label_names=label_names)
+            name, output_names=output_names, label_names=label_names, ctx=ctx)
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -812,16 +899,17 @@ class MAE(EvalMetric):
         labels, preds = check_label_shapes(labels, preds, True)
 
         for label, pred in zip(labels, preds):
-            label = label.asnumpy()
-            pred = pred.asnumpy()
+            label = label.as_in_context(pred.context)
 
             if len(label.shape) == 1:
                 label = label.reshape(label.shape[0], 1)
             if len(pred.shape) == 1:
                 pred = pred.reshape(pred.shape[0], 1)
 
-            self.sum_metric += numpy.abs(label - pred).mean()
+            self.sum_metric += (label - pred).abs().mean().as_in_context(self.ctx)
             self.num_inst += 1 # numpy.prod(label.shape)
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 
 @register
@@ -843,6 +931,15 @@ class MSE(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -854,9 +951,11 @@ class MSE(EvalMetric):
     ('mse', 0.375)
     """
     def __init__(self, name='mse',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(MSE, self).__init__(
-            name, output_names=output_names, label_names=label_names)
+            name, output_names=output_names, label_names=label_names,
+            ctx=ctx)
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -872,16 +971,18 @@ class MSE(EvalMetric):
         labels, preds = check_label_shapes(labels, preds, True)
 
         for label, pred in zip(labels, preds):
-            label = label.asnumpy()
-            pred = pred.asnumpy()
+            label = label.as_in_context(pred.context)
 
             if len(label.shape) == 1:
                 label = label.reshape(label.shape[0], 1)
             if len(pred.shape) == 1:
                 pred = pred.reshape(pred.shape[0], 1)
 
-            self.sum_metric += ((label - pred)**2.0).mean()
+            self.sum_metric += ((label - pred)**2.0).mean().as_in_context(self.ctx)
             self.num_inst += 1 # numpy.prod(label.shape)
+
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 
 @register
@@ -903,6 +1004,15 @@ class RMSE(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -914,9 +1024,11 @@ class RMSE(EvalMetric):
     ('rmse', 0.612372457981)
     """
     def __init__(self, name='rmse',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(RMSE, self).__init__(
-            name, output_names=output_names, label_names=label_names)
+            name, output_names=output_names, label_names=label_names,
+            ctx=ctx)
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -932,16 +1044,18 @@ class RMSE(EvalMetric):
         labels, preds = check_label_shapes(labels, preds, True)
 
         for label, pred in zip(labels, preds):
-            label = label.asnumpy()
-            pred = pred.asnumpy()
+            label = label.as_in_context(pred.context)
 
             if len(label.shape) == 1:
                 label = label.reshape(label.shape[0], 1)
             if len(pred.shape) == 1:
                 pred = pred.reshape(pred.shape[0], 1)
 
-            self.sum_metric += numpy.sqrt(((label - pred)**2.0).mean())
+            self.sum_metric += (((label - pred)**2.0).mean()).sqrt().as_in_context(self.ctx)
             self.num_inst += 1
+
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 
 @register
@@ -971,6 +1085,15 @@ class CrossEntropy(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -982,11 +1105,13 @@ class CrossEntropy(EvalMetric):
     ('cross-entropy', 0.57159948348999023)
     """
     def __init__(self, eps=1e-12, name='cross-entropy',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(CrossEntropy, self).__init__(
             name, eps=eps,
-            output_names=output_names, label_names=label_names)
+            output_names=output_names, label_names=label_names,
+            ctx=ctx)
         self.eps = eps
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -1002,15 +1127,16 @@ class CrossEntropy(EvalMetric):
         labels, preds = check_label_shapes(labels, preds, True)
 
         for label, pred in zip(labels, preds):
-            label = label.asnumpy()
-            pred = pred.asnumpy()
+            label = label.as_in_context(pred.context)
 
             label = label.ravel()
             assert label.shape[0] == pred.shape[0]
 
-            prob = pred[numpy.arange(label.shape[0]), numpy.int64(label)]
-            self.sum_metric += (-numpy.log(prob + self.eps)).sum()
+            prob = pred[ndarray.arange(label.shape[0]), label.astype('int64')]
+            self.sum_metric += (-numpy.log(prob + self.eps)).sum().as_in_context(self.ctx)
             self.num_inst += label.shape[0]
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 @register
 @alias('nll_loss')
@@ -1039,6 +1165,15 @@ class NegativeLogLikelihood(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -1050,11 +1185,12 @@ class NegativeLogLikelihood(EvalMetric):
     ('nll-loss', 0.57159948348999023)
     """
     def __init__(self, eps=1e-12, name='nll-loss',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(NegativeLogLikelihood, self).__init__(
             name, eps=eps,
-            output_names=output_names, label_names=label_names)
+            output_names=output_names, label_names=label_names, ctx=ctx)
         self.eps = eps
+        self.wait_to_read = wait_to_read
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -1070,15 +1206,16 @@ class NegativeLogLikelihood(EvalMetric):
         labels, preds = check_label_shapes(labels, preds, True)
 
         for label, pred in zip(labels, preds):
-            label = label.asnumpy()
-            pred = pred.asnumpy()
+            label = label.as_in_context(pred.context)
 
             label = label.ravel()
             num_examples = pred.shape[0]
             assert label.shape[0] == num_examples, (label.shape[0], num_examples)
-            prob = pred[numpy.arange(num_examples, dtype=numpy.int64), numpy.int64(label)]
-            self.sum_metric += (-numpy.log(prob + self.eps)).sum()
+            prob = pred[ndarray.arange(num_examples, dtype=numpy.int64), label.astype('int64')]
+            self.sum_metric += (-(prob + self.eps).log()).sum()
             self.num_inst += num_examples
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 @register
 @alias('pearsonr')
@@ -1128,6 +1265,7 @@ class PearsonCorrelation(EvalMetric):
         labels, preds = check_label_shapes(labels, preds, True)
 
         for label, pred in zip(labels, preds):
+
             check_label_shapes(label, pred, False, True)
             label = label.asnumpy()
             pred = pred.asnumpy()
@@ -1149,34 +1287,91 @@ class Loss(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
     """
     def __init__(self, name='loss',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(Loss, self).__init__(
-            name, output_names=output_names, label_names=label_names)
+            name, output_names=output_names, label_names=label_names, ctx=ctx)
+        self.wait_to_read = wait_to_read
 
     def update(self, _, preds):
         for pred in preds:
-            self.sum_metric += ndarray.sum(pred).asscalar()
+            self.sum_metric += pred.sum()
             self.num_inst += pred.size
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
 
 @register
 class Torch(Loss):
-    """Dummy metric for torch criterions."""
+    """Dummy metric for torch criterions.
+
+    Parameters
+    ----------
+    name : str
+        Name of this metric instance for display.
+    output_names : list of str, or None
+        Name of predictions that should be used when updating with update_dict.
+        By default include all predictions.
+    label_names : list of str, or None
+        Name of labels that should be used when updating with update_dict.
+        By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
+    """
+
     def __init__(self, name='torch',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(Torch, self).__init__(
-            name, output_names=output_names, label_names=label_names)
+            name, output_names=output_names, label_names=label_names,
+            ctx=ctx, wait_to_read=wait_to_read)
 
 
 @register
 class Caffe(Loss):
-    """Dummy metric for caffe criterions."""
+    """Dummy metric for caffe criterions.
+
+    Parameters
+    ----------
+    name : str
+        Name of this metric instance for display.
+    output_names : list of str, or None
+        Name of predictions that should be used when updating with update_dict.
+        By default include all predictions.
+    label_names : list of str, or None
+        Name of labels that should be used when updating with update_dict.
+        By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
+    """
     def __init__(self, name='caffe',
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         super(Caffe, self).__init__(
-            name, output_names=output_names, label_names=label_names)
+            name, output_names=output_names, label_names=label_names,
+            ctx=ctx, wait_to_read=wait_to_read)
 
 
 @register
@@ -1204,6 +1399,15 @@ class CustomMetric(EvalMetric):
     label_names : list of str, or None
         Name of labels that should be used when updating with update_dict.
         By default include all labels.
+    ctx: Context
+        Context where the metric is stored and computed. For example, it is
+        more efficient to store and compute the metric directly on GPU in a
+        single-GPU training scenario.
+        By default mx.cpu()
+    wait_to_read: Boolean
+        Whether to block and wait for the value of the accuracy to be computed on
+        every .update() call
+        By default True
 
     Examples
     --------
@@ -1216,7 +1420,7 @@ class CustomMetric(EvalMetric):
     ('custom(<lambda>)', 6.0)
     """
     def __init__(self, feval, name=None, allow_extra_outputs=False,
-                 output_names=None, label_names=None):
+                 output_names=None, label_names=None, ctx=ctx.cpu(), wait_to_read=True):
         if name is None:
             name = feval.__name__
             if name.find('<') != -1:
@@ -1224,9 +1428,11 @@ class CustomMetric(EvalMetric):
         super(CustomMetric, self).__init__(
             name, feval=feval,
             allow_extra_outputs=allow_extra_outputs,
-            output_names=output_names, label_names=label_names)
+            output_names=output_names, label_names=label_names, ctx=ctx)
         self._feval = feval
         self._allow_extra_outputs = allow_extra_outputs
+        self.wait_to_read = wait_to_read
+        self.expect_numpy = False
 
     def update(self, labels, preds):
         """Updates the internal evaluation result.
@@ -1243,10 +1449,23 @@ class CustomMetric(EvalMetric):
             labels, preds = check_label_shapes(labels, preds, True)
 
         for pred, label in zip(preds, labels):
-            label = label.asnumpy()
-            pred = pred.asnumpy()
+            if not self.expect_numpy:
+                # This is for backward compatibility
+                # If the CustomLoss expect explicitly a numpy array
+                # it will throw an exception and then we will feed numpy arrays
+                try:
+                    # for backward compatibility we move the label and pred on the ctx of
+                    # the metric
+                    label = label.as_in_context(self.context)
+                    pred = label.as_in_context(self.context)
+                    reval = self._feval(label, pred)
+                except:
+                    self.expect_numpy = True
+            else:
+                label = label.asnumpy()
+                pred = pred.asnumpy()
+                reval = self._feval(label, pred)
 
-            reval = self._feval(label, pred)
             if isinstance(reval, tuple):
                 (sum_metric, num_inst) = reval
                 self.sum_metric += sum_metric
@@ -1254,6 +1473,8 @@ class CustomMetric(EvalMetric):
             else:
                 self.sum_metric += reval
                 self.num_inst += 1
+        if self.wait_to_read:
+            self.sum_metric.wait_to_read()
 
     def get_config(self):
         raise NotImplementedError("CustomMetric cannot be serialized")
@@ -1289,6 +1510,8 @@ def np(numpy_feval, name=None, allow_extra_outputs=False):
     """
     def feval(label, pred):
         """Internal eval function."""
+        label = label.asnumpy()
+        pred = pred.asnumpy()
         return numpy_feval(label, pred)
     feval.__name__ = numpy_feval.__name__
     return CustomMetric(feval, name, allow_extra_outputs)
