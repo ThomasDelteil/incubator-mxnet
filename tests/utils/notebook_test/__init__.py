@@ -18,7 +18,7 @@
 #pylint: disable=no-member, too-many-locals, too-many-branches, no-self-use, broad-except, lost-exception, too-many-nested-blocks, too-few-public-methods, invalid-name
 """
     This file tests provides functionality to test that notebooks run without
-    warning or exception.
+    exception.
 """
 import io
 import logging
@@ -59,7 +59,7 @@ def run_notebook(notebook, notebook_dir, kernel=None, no_cache=False, temp_dir='
 
     Returns
     -------
-       Returns true if the workbook runs with no warning or exception.
+       Returns true if the workbook runs with no exception.
     """
     logging.info("Running notebook '{}'".format(notebook))
     notebook_path = os.path.join(*([notebook_dir] + notebook.split('/')))
@@ -109,10 +109,6 @@ def run_notebook(notebook, notebook_dir, kernel=None, no_cache=False, temp_dir='
         if notebook is not None:
             output_file = os.path.join(working_dir, "output.txt")
             nbformat.write(notebook, output_file)
-            output_nb = io.open(output_file, mode='r', encoding='utf-8')
-            for line in output_nb:
-                if "Warning:" in line:
-                    errors.append("Warning:\n" + line)
         if len(errors) > 0:
             logging.error('\n'.join(errors))
             return False
