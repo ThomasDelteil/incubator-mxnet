@@ -107,11 +107,8 @@ categories = json.load(open(image_net_labels_file, 'r'))
 onnx_path = os.path.join(model_folder, current_model, "model.onnx")
 ```
 
-We get the symbol and parameter objects
-
-
 ```python
-sym, arg_params, aux_params = onnx_mxnet.import_model(onnx_path)
+onnx_path = os.path.join(model_folder, current_model, "model.onnx")
 ```
 
 We pick a context, CPU is fine for inference, switch to mx.gpu() if you want to use your GPU.
@@ -121,55 +118,16 @@ We pick a context, CPU is fine for inference, switch to mx.gpu() if you want to 
 ctx = mx.cpu()
 ```
 
-We obtain the data names of the inputs to the model by using the model metadata API: 
 
 ```python
-model_metadata = onnx_mxnet.get_model_metadata(onnx_path)
-print(model_metadata)
-```
-
-```
-{'output_tensor_data': [(u'gpu_0/softmax_1', (1L, 1000L))],
- 'input_tensor_data': [(u'gpu_0/data_0', (1L, 3L, 224L, 224L))]}
-```
-
-```python
-data_names = [inputs[0] for inputs in model_metadata.get('input_tensor_data')]
-print(data_names)
-```
-
-
-```[u'data_0']```<!--notebook-skip-line-->
-
-And load them into a MXNet Gluon symbol block. 
-
-```python
-import warnings
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    net = gluon.nn.SymbolBlock(outputs=sym, inputs=mx.sym.var('data_0'))
-net_params = net.collect_params()
-for param in arg_params:
-    if param in net_params:
-        net_params[param]._load_init(arg_params[param], ctx=ctx)
-for param in aux_params:
-    if param in net_params:
-        net_params[param]._load_init(aux_params[param], ctx=ctx)
-```
-
-We can now cache the computational graph through [hybridization](https://mxnet.incubator.apache.org/tutorials/gluon/hybrid.html) to gain some performance
-
-
-
-```python
-net.hybridize()
+net = onnx_mxnet.import_to_gluon(onnx_path, ctx=ctx)
 ```
 
 We can visualize the network (requires graphviz installed)
 
 
 ```python
-mx.visualization.plot_network(sym,  node_attrs={"shape":"oval","fixedsize":"false"})
+mx.visualization.plot_network(net(mx.sym.var('data')),  node_attrs={"shape":"oval","fixedsize":"false"})
 ```
 
 
